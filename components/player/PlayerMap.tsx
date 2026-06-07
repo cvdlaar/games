@@ -17,14 +17,14 @@ export default function PlayerMap({ locations, ownership, players, myPlayerId, m
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<ReturnType<typeof import('leaflet')['map']> | null>(null)
   const myMarkerRef = useRef<ReturnType<typeof import('leaflet')['marker']> | null>(null)
-  const initialized = useRef(false)
 
   useEffect(() => {
-    if (!containerRef.current || initialized.current) return
-    initialized.current = true
+    if (!containerRef.current) return
+    let cancelled = false
 
     import('leaflet').then(L => {
-      const map = L.map(containerRef.current!, {
+      if (cancelled || !containerRef.current) return
+      const map = L.map(containerRef.current, {
         center: myPos ? [myPos.lat, myPos.lng] : [52.37, 4.9],
         zoom: 16,
         zoomControl: false,
@@ -40,9 +40,10 @@ export default function PlayerMap({ locations, ownership, players, myPlayerId, m
     })
 
     return () => {
+      cancelled = true
       mapRef.current?.remove()
       mapRef.current = null
-      initialized.current = false
+      myMarkerRef.current = null
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 

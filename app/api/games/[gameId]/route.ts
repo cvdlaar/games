@@ -5,19 +5,24 @@ export async function GET(_req: NextRequest, ctx: RouteContext<'/api/games/[game
   const supabase = await createClient()
   const { gameId } = await ctx.params
 
-  const { data, error } = await supabase
+  const { data: game, error } = await supabase
     .from('games')
-    .select(`
-      *,
-      locations(*),
-      players(id, name, color, alliance_id, crowns, lat, lng, last_seen, is_active),
-      location_ownership(*, player:players(id, name, color))
-    `)
+    .select('*')
     .eq('id', gameId)
     .single()
 
-  if (error) return Response.json({ error: 'Game not found' }, { status: 404 })
-  return Response.json(data)
+  if (error || !game) return Response.json({ error: 'Game not found' }, { status: 404 })
+
+  const [{ data: locations }, { data: players }, { data: ownership }] = await Promise.all([
+    supabase.from('locations').select('*').eq('game_id', gameId),
+    supabase.from('players').select('id, name, color, alliance_id, crowns, lat, lng, last_seen, is_active').eq('game_id', gameId),
+    supabase.from('location_ownership').select('*, player:players(id, name, color)').in(
+      'location_id',
+      (await supabase.from('locations').select('id').eq('game_id', gameId)).data?.map(l => l.id) ?? []
+    ),
+  ])
+
+  return Response.json({ ...game, locations: locations ?? [], players: players ?? [], location_ownership: ownership ?? [] })
 }
 
 export async function PATCH(request: NextRequest, ctx: RouteContext<'/api/games/[gameId]'>) {

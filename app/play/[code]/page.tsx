@@ -50,6 +50,7 @@ export default function PlayPage() {
   const [nearbyPlayers, setNearbyPlayers] = useState<Player[]>([])
   const [loading, setLoading] = useState(true)
   const [statusMsg, setStatusMsg] = useState('')
+  const [outsideGeofence, setOutsideGeofence] = useState(false)
 
   const playerIdRef = useRef<string>('')
   const playerTokenRef = useRef<string>('')
@@ -118,20 +119,26 @@ export default function PlayPage() {
       await fetchEvents(gameData.id)
       setLoading(false)
 
-      const supabase = createClient()
-      supabase
-        .channel(`play-${gameData.id}`)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'location_ownership' }, () => fetchGameData(gameData.id))
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'players', filter: `game_id=eq.${gameData.id}` }, async () => {
-          await fetchGameData(gameData.id)
-          await fetchRankings(gameData.id)
-        })
-        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'game_events', filter: `game_id=eq.${gameData.id}` }, () => fetchEvents(gameData.id))
-        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'encounters' }, () => checkEncounter())
-        .subscribe()
     }
     init()
   }, [code, router, fetchGameData, fetchRankings, fetchEvents, checkEncounter])
+
+  // Realtime subscriptions — set up after game is known, separately from async init
+  useEffect(() => {
+    if (!game) return
+    const supabase = createClient()
+    const channel = supabase
+      .channel(`play-rt-${game.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'location_ownership' }, () => fetchGameData(game.id))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'players', filter: `game_id=eq.${game.id}` }, async () => {
+        await fetchGameData(game.id)
+        await fetchRankings(game.id)
+      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'game_events', filter: `game_id=eq.${game.id}` }, () => fetchEvents(game.id))
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'encounters' }, () => checkEncounter())
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [game?.id, fetchGameData, fetchRankings, fetchEvents, checkEncounter]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // GPS tracking
   useEffect(() => {
@@ -150,6 +157,18 @@ export default function PlayPage() {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ token, lat, lng, last_seen: new Date().toISOString() }),
+        })
+
+        // Geofence check
+        setGame(currentGame => {
+          if (currentGame) {
+            const gf = (currentGame.config as { geofence?: { lat: number; lng: number; radius_meters: number } })?.geofence
+            if (gf) {
+              const dist = getDistanceMeters(lat, lng, gf.lat, gf.lng)
+              setOutsideGeofence(dist > gf.radius_meters)
+            }
+          }
+          return currentGame
         })
 
         // Check nearby players for encounters
@@ -193,6 +212,30 @@ export default function PlayPage() {
 
   if (!game) return null
 
+  // Game ended screen
+  if (game.status === 'ended') {
+    const sorted = rankings.length ? rankings : []
+    const me = sorted.find(p => p.id === myPlayer?.id)
+    return (
+      <div className="h-full flex flex-col items-center justify-center bg-[#0f0f1a] text-white p-6">
+        <div className="text-5xl mb-4">🏆</div>
+        <h1 className="text-2xl font-bold mb-1">{game.name}</h1>
+        <p className="text-white/40 mb-8">Spel beëindigd</p>
+        {me && <p className="mb-6 text-lg">Jij eindigde op <span className="font-bold text-yellow-300">plek #{me.rank}</span> met <span className="font-bold text-yellow-300">{me.crowns} 👑</span></p>}
+        <div className="w-full max-w-sm space-y-2">
+          {sorted.slice(0, 10).map(p => (
+            <div key={p.id} className={`flex items-center gap-3 p-3 rounded-xl ${p.id === myPlayer?.id ? 'bg-white/10 ring-1 ring-white/20' : 'bg-white/5'}`}>
+              <span className="text-lg w-8 text-center">{p.rank === 1 ? '🥇' : p.rank === 2 ? '🥈' : p.rank === 3 ? '🥉' : `#${p.rank}`}</span>
+              <div className="w-3 h-3 rounded-full shrink-0" style={{ background: p.color }} />
+              <span className="flex-1 font-semibold">{p.name}</span>
+              <span className="text-yellow-300 font-bold">{p.crowns} 👑</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
   const myOwnedCount = ownership.filter(o => o.player_id === myPlayer?.id).length
 
   return (
@@ -226,6 +269,15 @@ export default function PlayPage() {
               myPos={myPos}
               onLocationSelect={setSelectedLocation}
             />
+
+            {/* Geofence warning */}
+            {outsideGeofence && (
+              <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[1001] w-max slide-up">
+                <div className="bg-red-600 text-white px-4 py-2 rounded-full text-sm font-bold shadow-lg flex items-center gap-2">
+                  🚨 Je bent buiten het speelveld! Ga terug.
+                </div>
+              </div>
+            )}
 
             {/* Nearby players button */}
             {nearbyPlayers.length > 0 && (
