@@ -6,7 +6,7 @@ export async function GET(request: NextRequest) {
   const gameId = request.nextUrl.searchParams.get('gameId')
   if (!gameId) return Response.json({ error: 'gameId required' }, { status: 400 })
 
-  const [{ data: players }, { data: ownerships }] = await Promise.all([
+  const [{ data: players }, { data: ownerships }, { data: statsRows }] = await Promise.all([
     supabase
       .from('players')
       .select('id, name, color, crowns, is_active')
@@ -16,7 +16,14 @@ export async function GET(request: NextRequest) {
       .from('location_ownership')
       .select('player_id, location:locations(crown_value, type)')
       .eq('locations.game_id', gameId),
+    supabase
+      .from('player_stats')
+      .select('player_id, distance_meters')
+      .eq('game_id', gameId),
   ])
+
+  const distanceByPlayer: Record<string, number> = {}
+  for (const s of statsRows ?? []) distanceByPlayer[s.player_id] = s.distance_meters ?? 0
 
   const locationCountByPlayer: Record<string, number> = {}
   const crownValueByPlayer: Record<string, number> = {}
@@ -24,15 +31,17 @@ export async function GET(request: NextRequest) {
   for (const o of ownerships ?? []) {
     const pid = o.player_id
     locationCountByPlayer[pid] = (locationCountByPlayer[pid] ?? 0) + 1
-    const cv = (o.location as { crown_value: number } | null)?.crown_value ?? 0
+    const cv = (o.location as unknown as { crown_value: number } | null)?.crown_value ?? 0
     crownValueByPlayer[pid] = (crownValueByPlayer[pid] ?? 0) + cv
   }
 
   const ranked = (players ?? [])
     .map(p => ({
       ...p,
+      owned_count: locationCountByPlayer[p.id] ?? 0,
       location_count: locationCountByPlayer[p.id] ?? 0,
       crown_income: crownValueByPlayer[p.id] ?? 0,
+      distance_meters: distanceByPlayer[p.id] ?? 0,
       score: p.crowns + (locationCountByPlayer[p.id] ?? 0) * 50,
     }))
     .sort((a, b) => b.score - a.score)

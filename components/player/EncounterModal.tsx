@@ -1,28 +1,28 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Encounter, Player, EncounterChoice } from '@/lib/types'
+import { Encounter, Player, EncounterChoice, STRATEGY_PRESETS, StrategyType } from '@/lib/types'
 
 interface Props {
-  encounter: Encounter
+  encounter: Encounter & { already_chose?: boolean }
   myPlayer: Player
   players: Player[]
   onClose: () => void
   onResolved: (result: { result: 'win' | 'lose' | 'draw'; crown_change: number }) => void
 }
 
-const CHOICES: { key: EncounterChoice; label: string; emoji: string; description: string }[] = [
-  { key: 'attack',  label: 'Aanvallen', emoji: '⚔️', description: 'Win: steel kronen + locatie' },
-  { key: 'defend',  label: 'Verdedigen', emoji: '🛡️', description: 'Win: aanvaller verliest kronen' },
-  { key: 'trade',   label: 'Handelen', emoji: '🤝', description: 'Allebei +15 kronen (geen risico)' },
-  { key: 'dodge',   label: 'Ontwijken', emoji: '💨', description: 'Geen confrontatie, geen beloning' },
+const CHOICES: { key: EncounterChoice; code: string; label: string; desc: string; beats: string; color: string }[] = [
+  { key: 'attack', code: '⚔',  label: 'AANVALLEN',      desc: '+30 bij winst, −20 bij verlies',  beats: '✓ vs »  ✗ vs 🛡',    color: 'var(--red)'    },
+  { key: 'defend', code: '🛡',  label: 'VERDEDIGEN',     desc: '+30 bij winst, −20 bij verlies',  beats: '✓ vs ⚔  = vs rest',  color: 'var(--blue)'   },
+  { key: 'trade',  code: '◈',   label: 'ONDERHANDELEN',  desc: 'Altijd +15 — nooit verlies',      beats: '= altijd gelijkspel', color: 'var(--accent)' },
+  { key: 'dodge',  code: '»',   label: 'TERUGTREKKEN',   desc: '+0 bij gelijkspel, −20 vs aanval',beats: '✗ vs ⚔  = vs rest',  color: 'var(--dim)'    },
 ]
 
 export default function EncounterModal({ encounter, myPlayer, players, onClose, onResolved }: Props) {
   const [chosen, setChosen] = useState<EncounterChoice | null>(null)
   const [loading, setLoading] = useState(false)
   const [timeLeft, setTimeLeft] = useState(45)
-  const [waiting, setWaiting] = useState(false)
+  const [waiting, setWaiting] = useState(encounter.already_chose ?? false)
 
   const isInitiator = encounter.initiator_id === myPlayer.id
   const opponent = players.find(p => p.id === (isInitiator ? encounter.target_id : encounter.initiator_id))
@@ -32,10 +32,19 @@ export default function EncounterModal({ encounter, myPlayer, players, onClose, 
     const interval = setInterval(() => {
       const left = Math.max(0, Math.round((expires - Date.now()) / 1000))
       setTimeLeft(left)
-      if (left === 0) { clearInterval(interval); onClose() }
+      if (left === 0) {
+        clearInterval(interval)
+        // Notify server to mark encounter as expired
+        fetch(`/api/encounters/${encounter.id}/expire`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ player_id: myPlayer.id, token: localStorage.getItem('player_token') }),
+        }).catch(() => {})
+        onClose()
+      }
     }, 1000)
     return () => clearInterval(interval)
-  }, [encounter.expires_at, onClose])
+  }, [encounter.expires_at, encounter.id, myPlayer.id, onClose])
 
   async function submitChoice(choice: EncounterChoice) {
     setChosen(choice)
@@ -44,28 +53,21 @@ export default function EncounterModal({ encounter, myPlayer, players, onClose, 
       const res = await fetch(`/api/encounters/${encounter.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          player_id: myPlayer.id,
-          token: localStorage.getItem('player_token'),
-          choice,
-        }),
+        body: JSON.stringify({ player_id: myPlayer.id, token: localStorage.getItem('player_token'), choice }),
       })
       const data = await res.json()
       if (!res.ok) return
       if (data.status === 'waiting') {
         setWaiting(true)
         setLoading(false)
-        // Poll for resolution
         const poll = setInterval(async () => {
-          const r = await fetch(`/api/encounters/${encounter.id}`, { method: 'PATCH',
+          const r = await fetch(`/api/encounters/${encounter.id}`, {
+            method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ player_id: myPlayer.id, token: localStorage.getItem('player_token'), choice }),
           })
           const d = await r.json()
-          if (d.status === 'resolved') {
-            clearInterval(poll)
-            onResolved({ result: d.result, crown_change: d.crown_change ?? 0 })
-          }
+          if (d.status === 'resolved') { clearInterval(poll); onResolved({ result: d.result, crown_change: d.crown_change ?? 0 }) }
         }, 2000)
         setTimeout(() => clearInterval(poll), 45000)
       } else if (data.status === 'resolved') {
@@ -76,54 +78,91 @@ export default function EncounterModal({ encounter, myPlayer, players, onClose, 
     }
   }
 
+  const urgentTimer = timeLeft <= 10
+
   return (
-    <div className="absolute inset-0 z-[2000] flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="w-full max-w-sm mx-4 bg-[#1a1a2e] border border-orange-500/30 rounded-2xl p-5 slide-up">
+    <div className="absolute inset-0 z-[2000] flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)' }}>
+      <div className="w-full max-w-sm mx-4 slide-up rounded-2xl overflow-hidden" style={{ background: 'var(--surface)', border: '1.5px solid #fca5a5', boxShadow: '0 8px 40px rgba(0,0,0,0.2)' }}>
+
         {/* Header */}
-        <div className="text-center mb-5">
-          <div className="text-4xl mb-2">⚔️</div>
-          <h2 className="font-bold text-xl">Encounter!</h2>
-          <p className="text-white/60 text-sm mt-1">
-            <span style={{ color: opponent?.color }}>●</span>
-            {' '}<span className="font-semibold">{opponent?.name ?? 'Onbekend'}</span> staat naast je
-          </p>
-          <div className={`text-2xl font-bold mt-2 ${timeLeft <= 10 ? 'text-red-400' : 'text-orange-300'}`}>
-            {timeLeft}s
+        <div className="px-4 pt-4 pb-3" style={{ background: 'linear-gradient(145deg,#1e293b,#0f172a)', borderBottom: '1px solid rgba(239,68,68,0.25)' }}>
+          <div className="flex items-center justify-between mb-3">
+            <div className="mono text-[10px] font-black tracking-widest flex items-center gap-1.5" style={{ color: '#ef4444' }}>
+              <span className="w-1.5 h-1.5 rounded-full blink" style={{ background: '#ef4444', display: 'inline-block' }} />
+              CONTACT
+            </div>
+            <span className="mono font-black text-3xl tabular-nums" style={{ color: urgentTimer ? '#ef4444' : '#f59e0b' }}>
+              {String(timeLeft).padStart(2, '0')}
+            </span>
           </div>
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-2xl shrink-0 relative"
+              style={{ background: `${opponent?.color ?? '#aaa'}25`, border: `2px solid ${opponent?.color ?? '#aaa'}` }}>
+              {(opponent as (Player & { avatar?: string }) | undefined)?.avatar ?? opponent?.name?.charAt(0) ?? '?'}
+              <div className="absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-black"
+                style={{ background: '#ef4444', color: '#fff' }}>!</div>
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="font-black text-lg leading-tight truncate" style={{ color: '#f1f5f9' }}>{opponent?.name ?? 'ONBEKEND'}</p>
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <p className="mono text-xs" style={{ color: '#64748b' }}>{opponent?.crowns ?? 0}👑</p>
+                {opponent?.strategy && STRATEGY_PRESETS[opponent.strategy as StrategyType] && (
+                  <span className="text-[10px] font-black px-1.5 py-0.5 rounded-lg"
+                    style={{ background: `${STRATEGY_PRESETS[opponent.strategy as StrategyType].color}30`, color: STRATEGY_PRESETS[opponent.strategy as StrategyType].color }}>
+                    {STRATEGY_PRESETS[opponent.strategy as StrategyType].emoji} {STRATEGY_PRESETS[opponent.strategy as StrategyType].label}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+          <p className="mono text-[10px] tracking-widest mt-3 font-black" style={{ color: '#475569' }}>
+            KIES TACTIEK — {timeLeft}s RESTEREND
+          </p>
         </div>
 
-        {waiting ? (
-          <div className="text-center py-6">
-            <div className="text-3xl mb-3 animate-pulse">{CHOICES.find(c => c.key === chosen)?.emoji}</div>
-            <p className="font-semibold">{CHOICES.find(c => c.key === chosen)?.label} gekozen</p>
-            <p className="text-white/40 text-sm mt-2">Wachten op tegenstander...</p>
-          </div>
-        ) : (
-          <>
-            <div className="grid grid-cols-2 gap-2 mb-4">
-              {CHOICES.map(choice => (
-                <button
-                  key={choice.key}
-                  onClick={() => !loading && submitChoice(choice.key)}
-                  disabled={loading}
-                  className={`p-3 rounded-xl border transition-all text-left ${chosen === choice.key ? 'border-white/40 bg-white/15' : 'border-white/10 bg-white/5 hover:bg-white/10'}`}
-                >
-                  <div className="text-2xl mb-1">{choice.emoji}</div>
-                  <div className="font-semibold text-sm">{choice.label}</div>
-                  <div className="text-xs text-white/40">{choice.description}</div>
-                </button>
-              ))}
+        <div className="p-4">
+          {waiting ? (
+            <div className="py-6 text-center">
+              <div className="mono font-black text-4xl mb-3" style={{ color: CHOICES.find(c => c.key === chosen)?.color ?? 'var(--accent)' }}>
+                {CHOICES.find(c => c.key === chosen)?.code}
+              </div>
+              <p className="font-bold tracking-wide" style={{ color: 'var(--text)' }}>{CHOICES.find(c => c.key === chosen)?.label}</p>
+              <p className="mono text-xs tracking-widest mt-2" style={{ color: 'var(--muted)' }}>WACHT OP TEGENSTANDER...</p>
+              <div className="flex gap-1 justify-center mt-3">
+                {[0,1,2].map(i => (
+                  <div key={i} className="w-1.5 h-1.5 rounded-full blink" style={{ background: 'var(--dim)', animationDelay: `${i * 0.3}s` }} />
+                ))}
+              </div>
             </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 gap-1.5 mb-3">
+                {CHOICES.map(c => (
+                  <button key={c.key} onClick={() => !loading && submitChoice(c.key)} disabled={loading}
+                    className="p-3.5 rounded-xl text-left transition-all"
+                    style={{
+                      background: chosen === c.key ? `${c.color}18` : 'var(--surface)',
+                      border: `1px solid ${chosen === c.key ? c.color : 'var(--border2)'}`,
+                      boxShadow: chosen === c.key ? `0 0 12px ${c.color}25` : undefined,
+                    }}>
+                    <div className="mono font-black text-2xl mb-2" style={{ color: c.color }}>{c.code}</div>
+                    <div className="font-black text-xs tracking-wide mb-1" style={{ color: 'var(--text)' }}>{c.label}</div>
+                    <div className="mono text-[11px] leading-tight" style={{ color: 'var(--muted)' }}>{c.desc}</div>
+                    <div className="mono text-[10px] mt-1.5 px-1.5 py-0.5 rounded-lg inline-block" style={{ background: `${c.color}15`, color: c.color }}>{c.beats}</div>
+                  </button>
+                ))}
+              </div>
 
-            <div className="bg-white/5 rounded-xl p-3 text-xs text-white/50 text-center">
-              ⚔️ slaat 💨 &nbsp;·&nbsp; 🛡️ slaat ⚔️ &nbsp;·&nbsp; 🤝 is altijd veilig
-            </div>
-          </>
-        )}
+              <div className="mono text-[11px] text-center py-2 rounded-xl" style={{ background: 'var(--surface)', border: '1px solid var(--border2)', color: 'var(--dim)' }}>
+                ⚔ VERSLAAT » · 🛡 VERSLAAT ⚔ · ◈ ALTIJD GELIJK
+              </div>
+            </>
+          )}
 
-        <button onClick={onClose} className="w-full mt-3 py-2 text-white/20 text-xs hover:text-white/40 transition-colors">
-          Negeren (je verliest de kans)
-        </button>
+          <button onClick={onClose} className="w-full mt-3 py-2 mono text-xs tracking-widest uppercase" style={{ color: 'var(--dim)' }}>
+            NEGEREN — KAN NIET ONGEDAAN
+          </button>
+        </div>
       </div>
     </div>
   )

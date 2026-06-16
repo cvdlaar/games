@@ -1,6 +1,8 @@
 import { NextRequest } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getDistanceMeters } from '@/lib/game-logic'
+import { sendPush } from '@/lib/push'
+import type { PushSubscription as WebPushSubscription } from 'web-push'
 
 const ENCOUNTER_RADIUS = 50
 
@@ -18,6 +20,11 @@ export async function POST(request: NextRequest) {
 
   if (initiator.game_id !== target.game_id) {
     return Response.json({ error: 'Different games' }, { status: 400 })
+  }
+
+  // Alliance members cannot attack each other
+  if (initiator.alliance_id && initiator.alliance_id === target.alliance_id) {
+    return Response.json({ error: '🤝 Geen gevecht — jullie zitten in dezelfde alliantie!' }, { status: 400 })
   }
 
   if (!initiator.lat || !target.lat) {
@@ -53,6 +60,11 @@ export async function POST(request: NextRequest) {
     .single()
 
   if (error) return Response.json({ error: error.message }, { status: 500 })
+
+  // Push notification to target
+  const sub = (target.config as Record<string, unknown> | null)?.push_subscription as WebPushSubscription | undefined
+  if (sub) sendPush(sub, { title: '⚔ Aanval!', body: `${initiator.name} daagt jou uit — kies snel!`, tag: 'encounter' }).catch(() => {})
+
   return Response.json(data, { status: 201 })
 }
 
@@ -71,5 +83,11 @@ export async function GET(request: NextRequest) {
     .limit(1)
 
   if (error) return Response.json({ error: error.message }, { status: 500 })
-  return Response.json(data?.[0] ?? null)
+  if (!data?.[0]) return Response.json(null)
+
+  const enc = data[0]
+  const isInitiator = enc.initiator_id === playerId
+  // Tell client whether this player already submitted a choice (so they know to show "waiting" state)
+  const alreadyChose = isInitiator ? !!enc.initiator_choice : !!enc.target_choice
+  return Response.json({ ...enc, already_chose: alreadyChose })
 }

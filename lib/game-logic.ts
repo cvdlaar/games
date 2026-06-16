@@ -1,4 +1,30 @@
-import { EncounterChoice, ENCOUNTER_MATRIX } from './types'
+import { EncounterChoice, ENCOUNTER_MATRIX, Geofence, StrategyType } from './types'
+
+export function isInsideGeofence(lat: number, lng: number, geofence: Geofence): boolean {
+  if (geofence.type === 'polygon') {
+    const pts = geofence.points
+    if (pts.length < 3) return true
+    let inside = false
+    for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+      const xi = pts[i].lng, yi = pts[i].lat
+      const xj = pts[j].lng, yj = pts[j].lat
+      if (((yi > lat) !== (yj > lat)) && (lng < (xj - xi) * (lat - yi) / (yj - yi) + xi))
+        inside = !inside
+    }
+    return inside
+  }
+  return getDistanceMeters(lat, lng, geofence.lat, geofence.lng) <= geofence.radius_meters
+}
+
+export function polygonCentroid(points: Array<{ lat: number; lng: number }>): { lat: number; lng: number } {
+  const n = points.length
+  return { lat: points.reduce((s, p) => s + p.lat, 0) / n, lng: points.reduce((s, p) => s + p.lng, 0) / n }
+}
+
+export function scalePolygon(points: Array<{ lat: number; lng: number }>, factor: number): Array<{ lat: number; lng: number }> {
+  const c = polygonCentroid(points)
+  return points.map(p => ({ lat: c.lat + (p.lat - c.lat) * factor, lng: c.lng + (p.lng - c.lng) * factor }))
+}
 
 export function getDistanceMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371000
@@ -31,8 +57,8 @@ export function resolveEncounter(choice1: EncounterChoice, choice2: EncounterCho
   return { result1, result2 }
 }
 
-export function calculateEncounterReward(result: 'win' | 'lose' | 'draw', choice: EncounterChoice): number {
-  if (choice === 'trade') return 15
+export function calculateEncounterReward(result: 'win' | 'lose' | 'draw', choice: EncounterChoice, strategy?: StrategyType | null): number {
+  if (choice === 'trade') return strategy === 'handelaar' ? 30 : 15
   if (result === 'win') return 30
   if (result === 'lose') return -20
   return 0

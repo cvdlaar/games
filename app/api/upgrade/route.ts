@@ -33,10 +33,19 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: `Niet genoeg kronen (${cost} nodig, jij hebt ${player.crowns})` }, { status: 400 })
   }
 
-  await Promise.all([
-    supabase.from('location_ownership').update({ defense_level: currentLevel + 1 }).eq('id', ownership.id),
-    supabase.from('players').update({ crowns: player.crowns - cost }).eq('id', player_id),
-  ])
+  // Atomic update: only succeeds if defense_level hasn't changed since we read it
+  const { data: upgraded } = await supabase
+    .from('location_ownership')
+    .update({ defense_level: currentLevel + 1 })
+    .eq('id', ownership.id)
+    .eq('defense_level', currentLevel)
+    .select('id')
+
+  if (!upgraded || upgraded.length === 0) {
+    return Response.json({ error: 'Verdediging is al gewijzigd — herlaad en probeer opnieuw' }, { status: 409 })
+  }
+
+  await supabase.from('players').update({ crowns: player.crowns - cost }).eq('id', player_id)
 
   return Response.json({ defense_level: currentLevel + 1, cost, crowns_left: player.crowns - cost })
 }

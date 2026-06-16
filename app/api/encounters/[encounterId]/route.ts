@@ -8,6 +8,11 @@ export async function PATCH(request: NextRequest, ctx: RouteContext<'/api/encoun
   const { encounterId } = await ctx.params
   const { player_id, token, choice } = await request.json()
 
+  const VALID_CHOICES: EncounterChoice[] = ['attack', 'defend', 'trade', 'dodge']
+  if (!VALID_CHOICES.includes(choice as EncounterChoice)) {
+    return Response.json({ error: `Ongeldige keuze. Kies uit: ${VALID_CHOICES.join(', ')}` }, { status: 400 })
+  }
+
   const { data: player } = await supabase.from('players').select('*').eq('id', player_id).single()
   if (!player || player.token !== token) {
     return Response.json({ error: 'Unauthorized' }, { status: 403 })
@@ -28,6 +33,13 @@ export async function PATCH(request: NextRequest, ctx: RouteContext<'/api/encoun
   }
 
   const updateField = isInitiator ? 'initiator_choice' : 'target_choice'
+
+  // Idempotency: if this player already chose, re-return the waiting state rather than overwriting
+  if (encounter[updateField]) {
+    if (!encounter.initiator_choice || !encounter.target_choice) {
+      return Response.json({ status: 'waiting', message: 'Wacht op tegenstander...' })
+    }
+  }
   await supabase.from('encounters').update({ [updateField]: choice }).eq('id', encounterId)
 
   const updated = { ...encounter, [updateField]: choice }
@@ -45,12 +57,12 @@ export async function PATCH(request: NextRequest, ctx: RouteContext<'/api/encoun
   await supabase.from('encounters').update({ status: 'resolved', winner_id: winnerId }).eq('id', encounterId)
 
   const [{ data: init }, { data: targ }] = await Promise.all([
-    supabase.from('players').select('crowns').eq('id', encounter.initiator_id).single(),
-    supabase.from('players').select('crowns').eq('id', encounter.target_id).single(),
+    supabase.from('players').select('crowns, strategy').eq('id', encounter.initiator_id).single(),
+    supabase.from('players').select('crowns, strategy').eq('id', encounter.target_id).single(),
   ])
 
-  const initReward = calculateEncounterReward(result1, updated.initiator_choice as EncounterChoice)
-  const targReward = calculateEncounterReward(result2, updated.target_choice as EncounterChoice)
+  const initReward = calculateEncounterReward(result1, updated.initiator_choice as EncounterChoice, init?.strategy as import('@/lib/types').StrategyType | null | undefined)
+  const targReward = calculateEncounterReward(result2, updated.target_choice as EncounterChoice, targ?.strategy as import('@/lib/types').StrategyType | null | undefined)
 
   await Promise.all([
     supabase.from('players').update({ crowns: Math.max(0, (init?.crowns ?? 0) + initReward) }).eq('id', encounter.initiator_id),
@@ -67,6 +79,8 @@ export async function PATCH(request: NextRequest, ctx: RouteContext<'/api/encoun
       target_id: encounter.target_id,
       initiator_choice: updated.initiator_choice,
       target_choice: updated.target_choice,
+      initiator_strategy: init?.strategy ?? null,
+      target_strategy: targ?.strategy ?? null,
       winner_id: winnerId,
     },
   })

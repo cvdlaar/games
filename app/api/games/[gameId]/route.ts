@@ -1,5 +1,7 @@
 import { NextRequest } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { sendPush } from '@/lib/push'
+import type { PushSubscription as WebPushSubscription } from 'web-push'
 
 export async function GET(_req: NextRequest, ctx: RouteContext<'/api/games/[gameId]'>) {
   const supabase = await createClient()
@@ -40,6 +42,45 @@ export async function PATCH(request: NextRequest, ctx: RouteContext<'/api/games/
   const safeUpdates = Object.fromEntries(
     Object.entries(updates).filter(([k]) => allowed.includes(k))
   )
+
+  // When game goes active: stamp phase_started_at so auto-timer knows when phase 0 began
+  if (safeUpdates.status === 'active') {
+    const { data: currentGame } = await supabase.from('games').select('config').eq('id', gameId).single()
+    const cfg = (currentGame?.config ?? {}) as Record<string, unknown>
+    safeUpdates.config = { ...cfg, ...(safeUpdates.config as Record<string, unknown> ?? {}), phase_started_at: new Date().toISOString() }
+  }
+
+  // When game ends: auto-resolve all pending encounters as draw (+15 for both)
+  if (safeUpdates.status === 'ended') {
+    const { data: pendingEncounters } = await supabase
+      .from('encounters')
+      .select('id, initiator_id, target_id, game_id')
+      .eq('game_id', gameId)
+      .eq('status', 'pending')
+
+    for (const enc of pendingEncounters ?? []) {
+      await supabase.from('encounters').update({ status: 'resolved', winner_id: null }).eq('id', enc.id)
+      const [{ data: init }, { data: targ }] = await Promise.all([
+        supabase.from('players').select('crowns').eq('id', enc.initiator_id).single(),
+        supabase.from('players').select('crowns').eq('id', enc.target_id).single(),
+      ])
+      await Promise.all([
+        supabase.from('players').update({ crowns: (init?.crowns ?? 0) + 15 }).eq('id', enc.initiator_id),
+        supabase.from('players').update({ crowns: (targ?.crowns ?? 0) + 15 }).eq('id', enc.target_id),
+      ])
+      await supabase.from('game_events').insert({
+        game_id: enc.game_id, type: 'encounter_resolved', player_id: null,
+        data: { encounter_id: enc.id, initiator_id: enc.initiator_id, target_id: enc.target_id, initiator_choice: 'trade', target_choice: 'trade', winner_id: null, auto_resolved: true },
+      })
+    }
+
+    // Push notification to all active players
+    const { data: allPlayers } = await supabase.from('players').select('config').eq('game_id', gameId).eq('is_active', true)
+    for (const p of allPlayers ?? []) {
+      const sub = (p.config as Record<string, unknown> | null)?.push_subscription as WebPushSubscription | undefined
+      if (sub) sendPush(sub, { title: '🏁 Spel voorbij!', body: 'Het spel is afgelopen — bekijk de eindstand!', tag: 'game-end' }).catch(() => {})
+    }
+  }
 
   const { data, error } = await supabase
     .from('games')

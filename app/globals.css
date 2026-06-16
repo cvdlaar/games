@@ -1,8 +1,21 @@
 @import "tailwindcss";
 
+/* ── Colorful Game Design System ────────────────────────── */
 :root {
-  --background: #0f0f1a;
-  --foreground: #f0f0ff;
+  --bg:       #f0f4f8;
+  --surface:  #ffffff;
+  --surface2: #f8fafc;
+  --surface3: #f1f5f9;
+  --border:   #e2e8f0;
+  --border2:  #cbd5e1;
+  --accent:   #16a34a;
+  --accent2:  #22c55e;
+  --amber:    #d97706;
+  --red:      #dc2626;
+  --blue:     #2563eb;
+  --text:     #1e293b;
+  --muted:    #64748b;
+  --dim:      #94a3b8;
 }
 
 html, body {
@@ -10,36 +23,188 @@ html, body {
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
+  background: var(--bg);
+  color: var(--text);
   font-family: system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 
+/* ── Map ────────────────────────────────────────────────── */
 .leaflet-container {
-  background: #1a1a2e !important;
+  background: #e8eef4 !important;
   font-family: inherit !important;
 }
-
 .leaflet-control-attribution {
-  font-size: 10px !important;
+  font-size: 9px !important;
   opacity: 0.5;
+  background: rgba(255,255,255,0.8) !important;
+  color: var(--muted) !important;
+}
+.leaflet-control-zoom a {
+  background: var(--surface) !important;
+  color: var(--blue) !important;
+  border-color: var(--border2) !important;
+  font-weight: bold !important;
 }
 
+/* ── Scrollbar ──────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #ffffff30; border-radius: 2px; }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; }
 
-.no-select { user-select: none; }
+select { color-scheme: light; }
+
+/* ── Animations ─────────────────────────────────────────── */
+@keyframes slide-up {
+  from { transform: translateY(20px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+.slide-up { animation: slide-up 0.25s ease-out; }
+
+@keyframes slide-down {
+  from { transform: translateY(-16px); opacity: 0; }
+  to   { transform: translateY(0);     opacity: 1; }
+}
+.slide-down { animation: slide-down 0.3s ease-out; }
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  15% { transform: translateX(-6px); }
+  30% { transform: translateX(6px); }
+  45% { transform: translateX(-4px); }
+  60% { transform: translateX(4px); }
+  75% { transform: translateX(-2px); }
+}
+.shake { animation: shake 0.5s ease-out; }
+
+@keyframes pop-in {
+  0%   { transform: scale(0.85); opacity: 0; }
+  70%  { transform: scale(1.04); opacity: 1; }
+  100% { transform: scale(1);    opacity: 1; }
+}
+.pop-in { animation: pop-in 0.35s cubic-bezier(0.34,1.56,0.64,1); }
 
 @keyframes pulse-ring {
-  0% { transform: scale(0.8); opacity: 1; }
-  100% { transform: scale(2); opacity: 0; }
+  0%   { transform: scale(0.85); opacity: 1; }
+  100% { transform: scale(2);    opacity: 0; }
 }
 .pulse-ring { animation: pulse-ring 1.5s ease-out infinite; }
 
-@keyframes slide-up {
-  from { transform: translateY(100%); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
+@keyframes scan {
+  0%   { transform: translateY(-100%); }
+  100% { transform: translateY(100vh); }
 }
-.slide-up { animation: slide-up 0.3s ease-out; }
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+.blink { animation: blink 1s step-end infinite; }
+
+/* ── Card panel ─────────────────────────────────────────── */
+.tac-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+}
+
+.tac-panel-bright {
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  border-radius: 12px;
+}
+
+/* ── HUD label ──────────────────────────────────────────── */
+.hud-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+/* ── Mono data ──────────────────────────────────────────── */
+.mono {
+  font-family: ui-monospace, 'Courier New', monospace;
+}
+
+/* ── Grid texture overlay (optional subtle grid) ────────── */
+.tac-grid::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(var(--border) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border) 1px, transparent 1px);
+  background-size: 40px 40px;
+  opacity: 0.25;
+  pointer-events: none;
+}
+
+/* ── Corner bracket decoration ──────────────────────────── */
+.tac-bracket {
+  position: relative;
+}
+.tac-bracket::before,
+.tac-bracket::after {
+  content: '';
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-color: var(--accent2);
+  border-style: solid;
+  opacity: 0.5;
+}
+.tac-bracket::before {
+  top: 0; left: 0;
+  border-width: 1px 0 0 1px;
+}
+.tac-bracket::after {
+  bottom: 0; right: 0;
+  border-width: 0 1px 1px 0;
+}
+
+/* ── Status dot ─────────────────────────────────────────── */
+.status-active  { color: var(--accent);  }
+.status-standby { color: var(--amber);   }
+.status-offline { color: var(--dim);     }
+
+/* ── Elevated card ──────────────────────────────────────── */
+.tac-elevated {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+}
+
+/* ── Primary button ─────────────────────────────────────── */
+.tac-btn-primary {
+  background: var(--accent2);
+  color: #ffffff;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 15px;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(34,197,94,0.3);
+  transition: box-shadow 0.15s, opacity 0.15s, transform 0.1s;
+}
+.tac-btn-primary:hover { box-shadow: 0 6px 16px rgba(34,197,94,0.4); transform: translateY(-1px); }
+.tac-btn-primary:disabled { opacity: 0.4; transform: none; }
+
+/* ── Amber CTA button ───────────────────────────────────── */
+.tac-btn-amber {
+  background: #fffbeb;
+  color: var(--amber);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 15px;
+  border: 1.5px solid #fde68a;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(217,119,6,0.1);
+  transition: box-shadow 0.15s;
+}
+.tac-btn-amber:hover { box-shadow: 0 4px 12px rgba(217,119,6,0.2); }
