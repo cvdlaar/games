@@ -92,6 +92,10 @@ export default function PlayerMap({ locations, ownership, players, myPlayerId, m
         const region = regions?.find(r => r.id === (loc as Location & { region_id?: string | null }).region_id)
         const regionBar = region ? `<div style="position:absolute;bottom:0;left:0;right:0;height:3px;background:${region.color}"></div>` : ''
         const ownerStrip = `<div style="position:absolute;bottom:0;left:0;right:0;height:3px;background:${ownerColor};border-radius:0 0 8px 8px"></div>`
+        const defLevel = owner?.defense_level ?? 0
+        const defBadge = defLevel > 0
+          ? `<div style="position:absolute;top:-5px;right:-5px;background:#3b82f6;color:#fff;font-size:8px;font-weight:900;min-width:14px;height:14px;border-radius:7px;display:flex;align-items:center;justify-content:center;border:1.5px solid #fff;box-shadow:0 1px 4px rgba(59,130,246,0.5);padding:0 2px">🛡${defLevel}</div>`
+          : ''
         const icon = L.divIcon({
           html: `<div style="
             background:linear-gradient(145deg,#1e293b,#0f172a);
@@ -102,7 +106,7 @@ export default function PlayerMap({ locations, ownership, players, myPlayerId, m
             font-size:${canClaim ? '26px' : '20px'};
             box-shadow:${canClaim ? `0 0 0 3px ${ownerColor}50,0 0 16px ${ownerColor}30,` : ''}0 3px 10px rgba(0,0,0,0.5);
             position:relative;overflow:hidden;
-          ">${config.emoji}${ownerStrip}${regionBar}</div>`,
+          ">${config.emoji}${ownerStrip}${regionBar}${defBadge}</div>`,
           iconSize: [sz, sz],
           iconAnchor: [sz / 2, sz / 2],
           className: '',

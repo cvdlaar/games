@@ -73,7 +73,7 @@ export default function PlayPage() {
   const [outpostWarning, setOutpostWarning] = useState(false)
   const [storyEvent, setStoryEvent] = useState<StoryEventData | null>(null)
   const [stormActive, setStormActive] = useState(false)
-  const [alliances, setAlliances] = useState<Array<{ id: string; color: string }>>([])
+  const [alliances, setAlliances] = useState<Array<{ id: string; name: string; color: string }>>([])
   const [myAllianceId, setMyAllianceId] = useState<string | null>(null)
   const [regions, setRegions] = useState<Array<{ id: string; color: string; name: string }>>([])
   const [regionNotification, setRegionNotification] = useState<{ name: string; color: string } | null>(null)
@@ -476,6 +476,20 @@ export default function PlayPage() {
     )
     return () => navigator.geolocation.clearWatch(watchId)
   }, [])
+
+  async function joinAlliance(allianceId: string | null) {
+    const pid = playerIdRef.current
+    const token = playerTokenRef.current
+    const res = await fetch('/api/alliances/join', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ player_id: pid, token, alliance_id: allianceId }),
+    })
+    if (res.ok) {
+      setMyAllianceId(allianceId)
+      setMyPlayer(p => p ? { ...p, alliance_id: allianceId } : p)
+    }
+  }
 
   async function triggerEncounter(targetPlayer: Player) {
     const pid = playerIdRef.current
@@ -926,6 +940,57 @@ export default function PlayPage() {
                             : isContested ? '◎ Betwist'
                             : '◎ Onbezet'}
                         </p>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
+            {alliances.length > 0 && (
+              <div className="mt-5">
+                <h3 className="text-xs font-black tracking-widest mb-3" style={{ color: 'var(--muted)' }}>── ALLIANTIES ──</h3>
+                <div className="space-y-2">
+                  {alliances.map(al => {
+                    const isMine = myAllianceId === al.id
+                    const members = players.filter(p => (p as Player & { alliance_id?: string | null }).alliance_id === al.id)
+                    return (
+                      <div key={al.id} className="p-3 rounded-2xl transition-all"
+                        style={{
+                          background: isMine ? al.color + '18' : 'var(--surface)',
+                          border: `1.5px solid ${isMine ? al.color + '60' : 'var(--border)'}`,
+                          boxShadow: isMine ? `0 2px 10px ${al.color}25` : undefined,
+                        }}>
+                        <div className="flex items-center gap-2.5 mb-2">
+                          <div className="w-3 h-3 rounded-full shrink-0" style={{ background: al.color }} />
+                          <p className="font-black text-sm flex-1" style={{ color: 'var(--text)' }}>{al.name}</p>
+                          {isMine ? (
+                            <button onClick={() => joinAlliance(null)}
+                              className="text-xs px-2.5 py-1 rounded-xl font-bold transition-all"
+                              style={{ background: '#fef2f2', color: '#dc2626' }}>
+                              Verlaten
+                            </button>
+                          ) : (
+                            <button onClick={() => joinAlliance(al.id)}
+                              className="text-xs px-2.5 py-1 rounded-xl font-bold text-white transition-all"
+                              style={{ background: al.color, boxShadow: `0 2px 6px ${al.color}40` }}>
+                              Aansluiten →
+                            </button>
+                          )}
+                        </div>
+                        {members.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5">
+                            {members.map(m => (
+                              <span key={m.id} className="text-xs px-2 py-0.5 rounded-lg font-bold"
+                                style={{ background: al.color + '20', color: al.color }}>
+                                {(m as Player & { avatar?: string }).avatar ?? m.name[0]} {m.name}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        {members.length === 0 && (
+                          <p className="text-xs" style={{ color: 'var(--dim)' }}>── Nog geen leden ──</p>
+                        )}
                       </div>
                     )
                   })}

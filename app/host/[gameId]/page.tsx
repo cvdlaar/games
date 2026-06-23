@@ -59,6 +59,7 @@ export default function HostDashboard() {
   const [powerups, setPowerups] = useState<Powerup[]>([])
   const [powerupForm, setPowerupForm] = useState<{ type: PowerupType; label: string; emoji: string; lat: string; lng: string; amount: string; is_secret_location: boolean }>({ type: 'crowns_bonus', label: '', emoji: '💰', lat: '', lng: '', amount: '50', is_secret_location: false })
   const [adminEvents, setAdminEvents] = useState<AdminEvent[]>([])
+  const [timeline, setTimeline] = useState<Array<{ id: string; type: string; player_id: string | null; data: Record<string, unknown>; created_at: string }>>([])
   const [pendingPhotos, setPendingPhotos] = useState<Array<{ id: string; player_id: string; created_at: string; data: Record<string, unknown> }>>([])
   const [photoActionStatus, setPhotoActionStatus] = useState<Record<string, string>>({})
   const [alliances, setAlliances] = useState<Array<{ id: string; name: string; color: string }>>([])
@@ -121,6 +122,12 @@ export default function HostDashboard() {
     if (res.ok) setAdminEvents(await res.json())
   }, [gameId])
 
+  const fetchTimeline = useCallback(async () => {
+    const token = localStorage.getItem('host_token') ?? ''
+    const res = await fetch(`/api/game-events?gameId=${gameId}&host_token=${token}`)
+    if (res.ok) setTimeline(await res.json())
+  }, [gameId])
+
   const fetchAlliances = useCallback(async () => {
     const res = await fetch(`/api/alliances?gameId=${gameId}`)
     if (res.ok) setAlliances(await res.json())
@@ -143,7 +150,8 @@ export default function HostDashboard() {
     fetchGame()
     fetch(`/api/alliances?gameId=${gameId}`).then(r => r.ok ? r.json() : []).then(setAlliances)
     fetchRegions()
-  }, [fetchGame, gameId, fetchRegions])
+    fetchTimeline()
+  }, [fetchGame, gameId, fetchRegions, fetchTimeline])
 
   const fetchStats = useCallback(async () => {
     const [statsRes, histRes] = await Promise.all([
@@ -1377,7 +1385,15 @@ export default function HostDashboard() {
                         const locs = game.locations.filter(l => (l as Location & { region_id?: string | null }).region_id === r.id)
                         return (
                           <div key={r.id} className="flex items-center gap-2 px-2.5 py-2 rounded-xl" style={{ background: 'var(--surface2)', border: '1px solid var(--border)' }}>
-                            <div className="w-3 h-3 rounded-full shrink-0" style={{ background: r.color }} />
+                            <input type="color" value={r.color} title="Kleur wijzigen"
+                              onChange={async e => {
+                                const token = localStorage.getItem('host_token') ?? hostToken
+                                await fetch(`/api/regions/${r.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ host_token: token, color: e.target.value }) })
+                                await fetchRegions()
+                              }}
+                              className="w-6 h-6 rounded-full border-0 cursor-pointer shrink-0 p-0"
+                              style={{ background: 'none' }} />
                             <div className="flex-1 min-w-0">
                               <p className="font-bold text-sm truncate" style={{ color: 'var(--text)' }}>{r.name}</p>
                               <p className="text-xs" style={{ color: 'var(--muted)' }}>{locs.length} locatie{locs.length !== 1 ? 's' : ''}</p>
@@ -1528,6 +1544,37 @@ export default function HostDashboard() {
                       )
                     })}
                     {game.players.length === 0 && <p className="text-sm text-center py-8" style={{ color: 'var(--dim)' }}>Wacht op spelers…</p>}
+
+                    {/* Region control */}
+                    {regions.length > 0 && (
+                      <div className="pt-2 mt-1" style={{ borderTop: '1px solid var(--border)' }}>
+                        <p className="mono text-[10px] font-black tracking-widest mb-2" style={{ color: 'var(--muted)' }}>REGIO&apos;S</p>
+                        <div className="space-y-1">
+                          {regions.map(r => {
+                            const regionLocs = game.locations.filter(l => (l as Location & { region_id?: string | null }).region_id === r.id)
+                            const total = regionLocs.length
+                            const playerCounts: Record<string, number> = {}
+                            for (const loc of regionLocs) {
+                              const owner = game.location_ownership.find(o => o.location_id === loc.id)
+                              if (owner) playerCounts[owner.player_id] = (playerCounts[owner.player_id] ?? 0) + 1
+                            }
+                            const controllerId = total > 0 ? (Object.entries(playerCounts).find(([, c]) => c >= total)?.[0] ?? null) : null
+                            const controller = controllerId ? game.players.find(p => p.id === controllerId) : null
+                            const claimed = Object.values(playerCounts).reduce((a, b) => a + b, 0)
+                            return (
+                              <div key={r.id} className="flex items-center gap-2 px-2 py-1.5 rounded-xl" style={{ background: controller ? r.color + '12' : 'var(--surface2)', border: `1px solid ${controller ? r.color + '40' : 'var(--border)'}` }}>
+                                <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: r.color }} />
+                                <p className="text-xs font-bold flex-1 truncate" style={{ color: 'var(--text)' }}>{r.name}</p>
+                                <p className="text-xs tabular-nums shrink-0" style={{ color: 'var(--muted)' }}>{claimed}/{total}</p>
+                                {controller && (
+                                  <span className="text-[10px] font-black px-1.5 py-0.5 rounded-lg shrink-0" style={{ background: controller.color + '20', color: controller.color }}>{controller.name}</span>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -1571,7 +1618,48 @@ export default function HostDashboard() {
                 {/* EVENTS */}
                 {commandPanel === 'events' && (
                   <div className="p-3 space-y-2">
-                    <p className="font-black text-sm pt-1" style={{ color: 'var(--text)' }}>📡 Operaties</p>
+                    <div className="flex items-center justify-between pt-1 mb-1">
+                      <p className="font-black text-sm" style={{ color: 'var(--text)' }}>📡 Operaties</p>
+                      <button onClick={fetchTimeline} className="text-[10px] font-bold px-2 py-1 rounded-lg" style={{ background: 'var(--surface2)', color: 'var(--muted)' }}>↺ Ververs</button>
+                    </div>
+
+                    {/* Activiteitsfeed */}
+                    {timeline.length > 0 && (
+                      <details className="group">
+                        <summary className="flex items-center justify-between cursor-pointer list-none py-1">
+                          <p className="mono text-[10px] font-black tracking-widest" style={{ color: 'var(--muted)' }}>📋 ACTIVITEIT ({timeline.length})</p>
+                          <span className="text-xs group-open:rotate-180 transition-transform" style={{ color: 'var(--dim)' }}>▼</span>
+                        </summary>
+                        <div className="space-y-1 mt-1.5 max-h-52 overflow-y-auto">
+                          {timeline.map(ev => {
+                            const evPlayer = game.players.find(p => p.id === ev.player_id)
+                            const d = ev.data as Record<string, unknown>
+                            const typeIcon: Record<string, string> = {
+                              location_claimed: '🏴', encounter_resolved: '⚔️', crown_tick: '👑',
+                              phase_change: '⚔', admin_event: '📡', powerup_claimed: '⚡',
+                              storm: '🌩️', crown_rain: '◈', story: '📖', player_kicked: '🚫',
+                            }
+                            const icon = typeIcon[ev.type] ?? '●'
+                            const timeStr = new Date(ev.created_at).toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' })
+                            let summary = ev.type
+                            if (ev.type === 'location_claimed') summary = `${evPlayer?.name ?? '?'} nam ${(d.location_name as string) ?? '?'} in`
+                            else if (ev.type === 'encounter_resolved') summary = `Gevecht beëindigd${d.winner_id ? '' : ' (gelijkspel)'}`
+                            else if (ev.type === 'crown_tick') summary = `Inning — ${Object.keys(d.payouts as object).length} spelers`
+                            else if (ev.type === 'phase_change') summary = `Fase: ${(d.phase_name as string) ?? '?'}`
+                            else if (ev.type === 'admin_event') summary = (d.title as string) ?? 'Admin event'
+                            else if (ev.type === 'storm') summary = 'Veldslag — gebieden neutraal'
+                            else if (ev.type === 'crown_rain') summary = 'Schatkistuitdeling'
+                            return (
+                              <div key={ev.id} className="flex items-center gap-2 px-2 py-1 rounded-lg" style={{ background: 'var(--surface2)', border: '1px solid var(--border)' }}>
+                                <span className="text-sm shrink-0">{icon}</span>
+                                <p className="text-[11px] flex-1 truncate" style={{ color: 'var(--text)' }}>{summary}</p>
+                                <span className="mono text-[10px] shrink-0" style={{ color: 'var(--dim)' }}>{timeStr}</span>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </details>
+                    )}
 
                     {/* Auto-advies */}
                     {game.status === 'active' && (() => {
