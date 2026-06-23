@@ -79,7 +79,11 @@ export default function HostDashboard() {
   const [tickStatus, setTickStatus] = useState('')
   const [scheduledStart, setScheduledStart] = useState('')
   const [timeLeft, setTimeLeft] = useState<string>('')
+  const [autoTickEnabled, setAutoTickEnabled] = useState(false)
+  const [autoTickInterval, setAutoTickInterval] = useState(2)
+  const [osmError, setOsmError] = useState<string | null>(null)
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const autoTickRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const setupMapRef = useRef<{ flyTo: (latlng: [number, number], zoom: number) => void } | null>(null)
   const [storyNarratorId, setStoryNarratorId] = useState('scout')
   const [storyChapters, setStoryChapters] = useState<StoryChapter[]>([])
@@ -169,6 +173,20 @@ export default function HostDashboard() {
     if (tab === 'command' && commandPanel === 'allianties') fetchAlliances()
     if (tab === 'stats') fetchStats()
   }, [tab, commandPanel, fetchPowerups, fetchAdminEvents, fetchPendingPhotos, fetchAlliances, fetchStats])
+
+  // Auto-tick interval
+  useEffect(() => {
+    if (autoTickRef.current) { clearInterval(autoTickRef.current); autoTickRef.current = null }
+    if (!autoTickEnabled || !hostToken) return
+    autoTickRef.current = setInterval(async () => {
+      const res = await fetch('/api/tick', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ game_id: gameId, host_token: hostToken }) })
+      const d = await res.json()
+      setSavingStatus(res.ok ? `✅ Auto-tick: ${d.paid} spelers` : `❌ Tick fout`)
+      setTimeout(() => setSavingStatus(''), 2500)
+      await fetchGame()
+    }, autoTickInterval * 60 * 1000)
+    return () => { if (autoTickRef.current) clearInterval(autoTickRef.current) }
+  }, [autoTickEnabled, autoTickInterval, gameId, hostToken, fetchGame])
 
   // Load phases + story from game config
   useEffect(() => {
@@ -546,18 +564,24 @@ export default function HostDashboard() {
   async function fetchOsm(lat: number, lng: number, radius?: number) {
     const searchRadius = radius ?? osmRadius
     setOsmLoading(true)
+    setOsmError(null)
     setOsmSearchCenter({ lat, lng, radius: searchRadius })
-    const res = await fetch('/api/osm-import', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ lat, lng, radius_meters: searchRadius }),
-    })
-    if (res.ok) {
+    try {
+      const res = await fetch('/api/osm-import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lat, lng, radius_meters: searchRadius }),
+      })
       const data = await res.json()
+      if (!res.ok) { setOsmError(data.error ?? 'Ophalen mislukt'); return }
+      if (data.length === 0) { setOsmError('Geen locaties gevonden in dit gebied. Probeer een grotere radius.'); return }
       setOsmCandidates(data)
       setSelectedOsmIds(new Set(data.map((c: OsmCandidate) => c.id)))
+    } catch {
+      setOsmError('Verbinding mislukt — probeer opnieuw')
+    } finally {
+      setOsmLoading(false)
     }
-    setOsmLoading(false)
   }
 
   async function createPowerup() {
@@ -940,9 +964,11 @@ export default function HostDashboard() {
                       </button>
                     )}
                     {osmCandidates.length === 0 ? (
-                      <div className="p-4 rounded-xl text-center space-y-1.5" style={{ background: 'var(--surface2)', border: `1.5px dashed ${osmLoading ? 'var(--border)' : 'var(--border2)'}` }}>
+                      <div className="p-4 rounded-xl text-center space-y-1.5" style={{ background: 'var(--surface2)', border: `1.5px dashed ${osmLoading ? 'var(--border)' : osmError ? '#fca5a5' : 'var(--border2)'}` }}>
                         {osmLoading
-                          ? <><p className="text-sm animate-spin inline-block" style={{ color: 'var(--blue)' }}>⟳</p><p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>Ophalen…</p></>
+                          ? <><p className="text-sm animate-spin inline-block" style={{ color: 'var(--blue)' }}>⟳</p><p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>Ophalen… (max 9s)</p></>
+                          : osmError
+                          ? <><p className="text-sm font-bold" style={{ color: '#dc2626' }}>⚠ {osmError}</p><p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>Klik op de kaart om opnieuw te proberen</p></>
                           : <><p className="text-sm font-bold" style={{ color: 'var(--text)' }}>Klik op de kaart</p><p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>om locaties te zoeken</p></>
                         }
                       </div>
@@ -1526,7 +1552,17 @@ export default function HostDashboard() {
                     <div className="flex items-center justify-between mb-2 pt-1">
                       <p className="font-black text-sm" style={{ color: 'var(--text)' }}>🏆 Live ranglijst</p>
                       {game.status === 'active' && (
-                        <button onClick={manualTick} className="font-bold text-xs px-3 py-1.5 rounded-xl transition-all" style={{ background: '#f59e0b', color: '#fff', boxShadow: '0 2px 6px rgba(245,158,11,0.4)' }}>👑 Tick</button>
+                        <div className="flex items-center gap-1.5">
+                          <button onClick={manualTick} className="font-bold text-xs px-2.5 py-1.5 rounded-xl transition-all" style={{ background: '#f59e0b', color: '#fff', boxShadow: '0 2px 6px rgba(245,158,11,0.4)' }}>👑</button>
+                          <button onClick={() => setAutoTickEnabled(v => !v)} className="font-bold text-xs px-2.5 py-1.5 rounded-xl transition-all"
+                            style={{ background: autoTickEnabled ? '#22c55e' : 'var(--surface2)', color: autoTickEnabled ? '#fff' : 'var(--muted)', border: `1.5px solid ${autoTickEnabled ? '#22c55e' : 'var(--border)'}` }}>
+                            {autoTickEnabled ? `⏱ ${autoTickInterval}m` : '⏱ Auto'}
+                          </button>
+                          {autoTickEnabled && (
+                            <input type="number" min={1} max={10} value={autoTickInterval} onChange={e => setAutoTickInterval(Math.max(1, +e.target.value))}
+                              className="w-10 text-center text-xs font-bold rounded-lg outline-none" style={{ background: 'var(--surface2)', border: '1.5px solid var(--border)', color: 'var(--text)', padding: '4px 2px' }} />
+                          )}
+                        </div>
                       )}
                     </div>
                     {game.players.sort((a, b) => b.crowns - a.crowns).map((p, i) => {

@@ -1,6 +1,8 @@
 import { NextRequest } from 'next/server'
 import { LocationType, ChallengeType, LOCATION_TYPE_CONFIG } from '@/lib/types'
 
+export const maxDuration = 25
+
 interface OverpassElement {
   id: number
   lat?: number
@@ -49,31 +51,33 @@ function defaultChallengeType(type: LocationType): ChallengeType {
   return 'checkin'
 }
 
+const OVERPASS_ENDPOINTS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
+]
+
 export async function POST(request: NextRequest) {
   const { lat, lng, radius_meters = 1000 } = await request.json()
 
-  const query = `
-    [out:json][timeout:15];
-    (
-      node["name"]["amenity"~"pub|bar|restaurant|marketplace|school|library|community_centre|townhall|post_office|place_of_worship"](around:${radius_meters},${lat},${lng});
-      node["name"]["tourism"~"attraction|museum|viewpoint"](around:${radius_meters},${lat},${lng});
-      node["name"]["historic"](around:${radius_meters},${lat},${lng});
-      node["name"]["leisure"~"park|playground"](around:${radius_meters},${lat},${lng});
-      node["name"]["highway"="bus_stop"](around:${radius_meters},${lat},${lng});
-      node["name"]["railway"~"station|halt"](around:${radius_meters},${lat},${lng});
-      node["name"]["building"~"church|chapel"](around:${radius_meters},${lat},${lng});
-    );
-    out center 60;
-  `
+  const query = `[out:json][timeout:8];(node["name"]["amenity"~"pub|bar|restaurant|marketplace|school|library|community_centre|townhall|post_office|place_of_worship"](around:${radius_meters},${lat},${lng});node["name"]["tourism"~"attraction|museum|viewpoint"](around:${radius_meters},${lat},${lng});node["name"]["historic"](around:${radius_meters},${lat},${lng});node["name"]["leisure"~"park|playground"](around:${radius_meters},${lat},${lng});node["name"]["highway"="bus_stop"](around:${radius_meters},${lat},${lng});node["name"]["railway"~"station|halt"](around:${radius_meters},${lat},${lng});node["name"]["building"~"church|chapel"](around:${radius_meters},${lat},${lng}););out center 50;`
 
-  const res = await fetch('https://overpass-api.de/api/interpreter', {
-    method: 'POST',
-    body: query,
-    headers: { 'Content-Type': 'text/plain' },
-  })
+  let res: Response | null = null
+  for (const endpoint of OVERPASS_ENDPOINTS) {
+    try {
+      res = await fetch(endpoint, {
+        method: 'POST',
+        body: query,
+        headers: { 'Content-Type': 'text/plain' },
+        signal: AbortSignal.timeout(9000),
+      })
+      if (res.ok) break
+    } catch {
+      res = null
+    }
+  }
 
-  if (!res.ok) {
-    return Response.json({ error: 'Overpass API fout' }, { status: 502 })
+  if (!res?.ok) {
+    return Response.json({ error: 'Overpass API niet bereikbaar — probeer later opnieuw' }, { status: 502 })
   }
 
   const data = await res.json()

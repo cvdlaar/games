@@ -36,9 +36,11 @@ interface Props {
   alliances?: AllianceInfo[]
   myAllianceId?: string | null
   regions?: RegionInfo[]
+  missionLocationId?: string | null
+  boostedLocationId?: string | null
 }
 
-export default function PlayerMap({ locations, ownership, players, myPlayerId, myPos, onLocationSelect, secretPowerups, geofence, homeBase, alliances, myAllianceId, regions }: Props) {
+export default function PlayerMap({ locations, ownership, players, myPlayerId, myPos, onLocationSelect, secretPowerups, geofence, homeBase, alliances, myAllianceId, regions, missionLocationId, boostedLocationId }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<ReturnType<typeof import('leaflet')['map']> | null>(null)
   const myMarkerRef = useRef<ReturnType<typeof import('leaflet')['marker']> | null>(null)
@@ -96,6 +98,14 @@ export default function PlayerMap({ locations, ownership, players, myPlayerId, m
         const defBadge = defLevel > 0
           ? `<div style="position:absolute;top:-5px;right:-5px;background:#3b82f6;color:#fff;font-size:8px;font-weight:900;min-width:14px;height:14px;border-radius:7px;display:flex;align-items:center;justify-content:center;border:1.5px solid #fff;box-shadow:0 1px 4px rgba(59,130,246,0.5);padding:0 2px">🛡${defLevel}</div>`
           : ''
+        const isMission = missionLocationId === loc.id
+        const isBoosted = boostedLocationId === loc.id
+        const missionBadge = isMission
+          ? `<div style="position:absolute;top:-5px;left:-5px;background:#f59e0b;color:#fff;font-size:9px;font-weight:900;padding:1px 4px;border-radius:6px;border:1.5px solid #fff;box-shadow:0 1px 4px rgba(245,158,11,0.5);white-space:nowrap">🎯</div>`
+          : ''
+        const boostBadge = isBoosted
+          ? `<div style="position:absolute;bottom:-6px;left:50%;transform:translateX(-50%);background:#22c55e;color:#fff;font-size:8px;font-weight:900;padding:1px 4px;border-radius:6px;border:1.5px solid #fff;box-shadow:0 1px 4px rgba(34,197,94,0.5);white-space:nowrap">⚡3×</div>`
+          : ''
         const icon = L.divIcon({
           html: `<div style="
             background:linear-gradient(145deg,#1e293b,#0f172a);
@@ -106,7 +116,7 @@ export default function PlayerMap({ locations, ownership, players, myPlayerId, m
             font-size:${canClaim ? '26px' : '20px'};
             box-shadow:${canClaim ? `0 0 0 3px ${ownerColor}50,0 0 16px ${ownerColor}30,` : ''}0 3px 10px rgba(0,0,0,0.5);
             position:relative;overflow:hidden;
-          ">${config.emoji}${ownerStrip}${regionBar}${defBadge}</div>`,
+          ">${config.emoji}${ownerStrip}${regionBar}${defBadge}${missionBadge}${boostBadge}</div>`,
           iconSize: [sz, sz],
           iconAnchor: [sz / 2, sz / 2],
           className: '',
@@ -170,7 +180,7 @@ export default function PlayerMap({ locations, ownership, players, myPlayerId, m
 
       return () => allLayers.forEach(l => l.remove())
     })
-  }, [locations, ownership, players, myPlayerId, myPos, onLocationSelect, secretPowerups, regions])
+  }, [locations, ownership, players, myPlayerId, myPos, onLocationSelect, secretPowerups, regions, missionLocationId, boostedLocationId])
 
   // Draw geofence zone + home base
   useEffect(() => {

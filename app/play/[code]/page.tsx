@@ -634,6 +634,19 @@ export default function PlayPage() {
         return getDistanceMeters(myPos.lat, myPos.lng, p.lat, p.lng) < visRadius
       })
 
+  // Active bonus mission location (last admin_event with event_type=bonus_mission, not yet won)
+  const lastMissionEvent = events.find(ev => ev.type === 'admin_event' && (ev.data as Record<string, unknown>).event_type === 'bonus_mission')
+  const lastMissionWon = events.find(ev => ev.type === 'bonus_mission_won')
+  const activeMissionLocationId = lastMissionEvent && (!lastMissionWon || lastMissionWon.created_at < lastMissionEvent.created_at)
+    ? (lastMissionEvent.data as Record<string, unknown>).location_id as string | null
+    : null
+
+  // Active location boost (within last 15 minutes)
+  const lastBoostEvent = events.find(ev => ev.type === 'admin_event' && (ev.data as Record<string, unknown>).event_type === 'location_boost')
+  const boostedLocationId = lastBoostEvent && (Date.now() - new Date(lastBoostEvent.created_at).getTime()) < 15 * 60 * 1000
+    ? (lastBoostEvent.data as Record<string, unknown>).location_id as string | null
+    : null
+
   const narratorId = game ? ((game.config as Record<string, unknown>)?.story as Record<string, unknown> | undefined)?.narrator_id as string | undefined : undefined
   const narrator = NARRATOR_PRESETS.find(n => n.id === narratorId) ?? null
   const narratorColor = narrator?.color ?? '#2563eb'
@@ -759,6 +772,8 @@ export default function PlayPage() {
               alliances={alliances}
               myAllianceId={myAllianceId}
               regions={regions}
+              missionLocationId={activeMissionLocationId}
+              boostedLocationId={boostedLocationId}
             />
 
             {/* Map HUD alerts */}
@@ -1175,6 +1190,7 @@ export default function PlayPage() {
             setStatusMsg(msg)
             setTimeout(() => setStatusMsg(''), 3000)
           }}
+          onRefresh={() => { if (game) fetchGameData(game.id) }}
         />
       )}
 

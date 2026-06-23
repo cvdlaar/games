@@ -15,9 +15,10 @@ interface Props {
   onClose: () => void
   onSuccess: (msg: string) => void
   onError: (msg: string) => void
+  onRefresh?: () => void
 }
 
-export default function ChallengeModal({ location, ownership, myPlayer, myPos, onClose, onSuccess, onError }: Props) {
+export default function ChallengeModal({ location, ownership, myPlayer, myPos, onClose, onSuccess, onError, onRefresh }: Props) {
   const [answer, setAnswer] = useState('')
   const [loading, setLoading] = useState(false)
   const [phase, setPhase] = useState<'info' | 'challenge'>('info')
@@ -116,6 +117,7 @@ export default function ChallengeModal({ location, ownership, myPlayer, myPos, o
       const data = await res.json()
       if (!res.ok) { onError(data.error); return }
       onSuccess(`Verdediging niveau ${data.defense_level} geactiveerd`)
+      onRefresh?.()
     } finally {
       setUpgrading(false)
     }
