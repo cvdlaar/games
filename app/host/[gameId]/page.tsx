@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import { Game, Location, Player, LocationOwnership, LocationType, ChallengeType, LOCATION_TYPE_CONFIG, Powerup, PowerupType, POWERUP_CONFIG, ADMIN_EVENT_TEMPLATES, AdminEvent, DEFAULT_PHASES, GamePhase, StoryChapter, NARRATOR_PRESETS } from '@/lib/types'
 import { createClient } from '@/lib/supabase/client'
+import { OVERPASS_ENDPOINTS, buildOverpassQuery, parseOverpassElements, OverpassElement } from '@/lib/osm-classify'
 
 const HostMap = dynamic(() => import('@/components/host/HostMap'), { ssr: false })
 const CrownChart = dynamic(() => import('@/components/host/CrownChart'), { ssr: false })
@@ -566,22 +567,27 @@ export default function HostDashboard() {
     setOsmLoading(true)
     setOsmError(null)
     setOsmSearchCenter({ lat, lng, radius: searchRadius })
-    try {
-      const res = await fetch('/api/osm-import', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lat, lng, radius_meters: searchRadius }),
-      })
-      const data = await res.json()
-      if (!res.ok) { setOsmError(data.error ?? 'Ophalen mislukt'); return }
-      if (data.length === 0) { setOsmError('Geen locaties gevonden in dit gebied. Probeer een grotere radius.'); return }
-      setOsmCandidates(data)
-      setSelectedOsmIds(new Set(data.map((c: OsmCandidate) => c.id)))
-    } catch {
-      setOsmError('Verbinding mislukt — probeer opnieuw')
-    } finally {
-      setOsmLoading(false)
+
+    const query = buildOverpassQuery(lat, lng, searchRadius)
+    let rawData: { elements?: OverpassElement[] } | null = null
+    for (const endpoint of OVERPASS_ENDPOINTS) {
+      try {
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          body: query,
+          headers: { 'Content-Type': 'text/plain' },
+          signal: AbortSignal.timeout(15000),
+        })
+        if (res.ok) { rawData = await res.json(); break }
+      } catch { /* try next endpoint */ }
     }
+
+    setOsmLoading(false)
+    if (!rawData) { setOsmError('Overpass API niet bereikbaar — probeer later opnieuw'); return }
+    const locations = parseOverpassElements(rawData.elements ?? [])
+    if (locations.length === 0) { setOsmError('Geen locaties gevonden in dit gebied. Probeer een grotere radius.'); return }
+    setOsmCandidates(locations)
+    setSelectedOsmIds(new Set(locations.map(c => c.id)))
   }
 
   async function createPowerup() {

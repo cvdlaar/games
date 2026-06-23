@@ -82,7 +82,8 @@ export default function PlayPage() {
   const [isOffline, setIsOffline] = useState(false)
   const [myStrategy, setMyStrategy] = useState<StrategyType | null>(() => localStorage.getItem('player_strategy') as StrategyType | null)
   const [locationLostMsg, setLocationLostMsg] = useState<{ name: string; attacker: string } | null>(null)
-
+  const [tickCountdown, setTickCountdown] = useState<string | null>(null)
+  const [tickGain, setTickGain] = useState<number | null>(null)
 
   const playerIdRef = useRef<string>('')
   const playerTokenRef = useRef<string>('')
@@ -90,6 +91,7 @@ export default function PlayPage() {
   const playersRef = useRef<Player[]>([])
   const locationsRef = useRef<Location[]>([])
   const prevRegionControllersRef = useRef<Record<string, string | null>>({})
+  const lastTickAtRef = useRef<number | null>(null)
   playersRef.current = players
   locationsRef.current = locations
 
@@ -288,6 +290,29 @@ export default function PlayPage() {
     prevRegionControllersRef.current = newControllers
   }, [ownership]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Sync lastTickAtRef from events on load
+  useEffect(() => {
+    const lastTick = events.find(ev => ev.type === 'crown_tick')
+    if (lastTick && !lastTickAtRef.current) {
+      lastTickAtRef.current = new Date(lastTick.created_at).getTime()
+    }
+  }, [events])
+
+  // Tick countdown timer
+  useEffect(() => {
+    if (!game) return
+    const tickMin = (game.config as { crown_tick_interval_minutes?: number })?.crown_tick_interval_minutes ?? 2
+    const id = setInterval(() => {
+      if (!lastTickAtRef.current) { setTickCountdown(null); return }
+      const next = lastTickAtRef.current + tickMin * 60 * 1000
+      const remaining = Math.max(0, next - Date.now())
+      const m = Math.floor(remaining / 60000)
+      const s = Math.floor((remaining % 60000) / 1000)
+      setTickCountdown(`${m}:${s.toString().padStart(2, '0')}`)
+    }, 1000)
+    return () => clearInterval(id)
+  }, [game?.id, game?.config]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // Poll buffs every 30s
   useEffect(() => {
     const pid = playerIdRef.current
@@ -382,6 +407,12 @@ export default function PlayPage() {
         const ev = payload.new as GameEvent
         setEvents(prev => [ev, ...prev].slice(0, 30))
         fetchEvents(game.id, true)
+        if (ev.type === 'crown_tick') {
+          const payouts = (ev.data as Record<string, unknown>).payouts as Record<string, number> | undefined
+          const myPayout = playerIdRef.current ? (payouts?.[playerIdRef.current] ?? 0) : 0
+          if (myPayout > 0) { setTickGain(myPayout); setTimeout(() => setTickGain(null), 3000) }
+          lastTickAtRef.current = Date.now()
+        }
       })
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'encounters' }, () => checkEncounter())
       .subscribe()
@@ -697,9 +728,14 @@ export default function PlayPage() {
             <div className="flex items-center gap-1 px-2.5 py-1 rounded-xl" style={{ background: '#fff', boxShadow: '0 2px 6px rgba(0,0,0,0.15)' }}>
               <span className="text-xs font-bold" style={{ color: '#2563eb' }}>{myOwnedCount} 🏴</span>
             </div>
-            <div className="flex items-center gap-1 px-3 py-1 rounded-full" style={{ background: 'linear-gradient(135deg, #f59e0b, #ef4444)', boxShadow: '0 2px 8px rgba(245,158,11,0.4)' }}>
-              <span className="font-black text-base leading-none" style={{ color: '#fff' }}>{myPlayer?.crowns ?? 0}</span>
-              <span className="text-sm">👑</span>
+            <div className="flex flex-col items-end gap-0.5">
+              <div className="flex items-center gap-1 px-3 py-1 rounded-full" style={{ background: 'linear-gradient(135deg, #f59e0b, #ef4444)', boxShadow: '0 2px 8px rgba(245,158,11,0.4)' }}>
+                <span className="font-black text-base leading-none" style={{ color: '#fff' }}>{myPlayer?.crowns ?? 0}</span>
+                <span className="text-sm">👑</span>
+              </div>
+              {tickCountdown && (
+                <span style={{ fontSize: '9px', fontWeight: 700, color: 'rgba(255,255,255,0.65)', letterSpacing: '0.02em' }}>💰 {tickCountdown}</span>
+              )}
             </div>
           </div>
         </div>
@@ -775,6 +811,14 @@ export default function PlayPage() {
               missionLocationId={activeMissionLocationId}
               boostedLocationId={boostedLocationId}
             />
+
+            {/* Crown tick gain toast */}
+            {tickGain !== null && (
+              <div className="absolute top-20 left-1/2 z-[1010] pointer-events-none"
+                style={{ transform: 'translateX(-50%)', background: 'linear-gradient(135deg,#16a34a,#22c55e)', color: '#fff', fontSize: '20px', fontWeight: 900, padding: '10px 22px', borderRadius: '24px', boxShadow: '0 4px 20px rgba(34,197,94,0.5)', whiteSpace: 'nowrap', letterSpacing: '-0.01em' }}>
+                +{tickGain} 👑
+              </div>
+            )}
 
             {/* Map HUD alerts */}
             {locationLostMsg && (
